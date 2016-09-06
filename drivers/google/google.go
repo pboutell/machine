@@ -21,6 +21,7 @@ type Driver struct {
 	DiskType          string
 	Address           string
 	Network           string
+	Subnetwork        string
 	Preemptible       bool
 	UseInternalIP     bool
 	UseInternalIPOnly bool
@@ -40,6 +41,7 @@ const (
 	defaultDiskType    = "pd-standard"
 	defaultDiskSize    = 10
 	defaultNetwork     = "default"
+	defaultSubnetwork  = ""
 )
 
 // GetCreateFlags registers the flags this driver adds to
@@ -100,6 +102,12 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: "GOOGLE_NETWORK",
 		},
 		mcnflag.StringFlag{
+			Name:   "google-subnetwork",
+			Usage:  "Specify subnetwork in which to provision vm",
+			Value:  defaultSubnetwork,
+			EnvVar: "GOOGLE_SUBNETWORK",
+		},
+		mcnflag.StringFlag{
 			Name:   "google-address",
 			Usage:  "GCE Instance External IP",
 			EnvVar: "GOOGLE_ADDRESS",
@@ -142,6 +150,7 @@ func NewDriver(machineName string, storePath string) *Driver {
 		MachineType:  defaultMachineType,
 		MachineImage: defaultImageName,
 		Network:      defaultNetwork,
+		Subnetwork:   defaultSubnetwork,
 		Scopes:       defaultScopes,
 		BaseDriver: &drivers.BaseDriver{
 			SSHUser:     defaultUser,
@@ -185,6 +194,7 @@ func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 		d.DiskType = flags.String("google-disk-type")
 		d.Address = flags.String("google-address")
 		d.Network = flags.String("google-network")
+		d.Subnetwork = flags.String("google-subnetwork")
 		d.Preemptible = flags.Bool("google-preemptible")
 		d.UseInternalIP = flags.Bool("google-use-internal-ip") || flags.Bool("google-use-internal-ip-only")
 		d.UseInternalIPOnly = flags.Bool("google-use-internal-ip-only")
