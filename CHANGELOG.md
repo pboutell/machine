@@ -1,5 +1,19 @@
 # Changelog
 
+# 0.8.2 (2016-8-26)
+
+- Update Go version to 1.7.1
+
+# 0.8.1 (2016-8-20)
+
+Provisioners
+- Fix issue with generated systemd service file on RedHat family distros
+Drivers
+- `azure`
+    - Bump Ubuntu image to 16.04
+    - Update docs with updated default parameters
+    - Change logging slightly
+
 # 0.8.0 (2016-6-14)
 
 General
@@ -236,7 +250,7 @@ Misc
 
 - Update docker-machine version
 - Updated the bash completion with new options added
-- Bugsnag: Retrieve windows version on non-english OS
+- Bugsnag: Retrieve windows version on non-English OS
 
 Drivers
 

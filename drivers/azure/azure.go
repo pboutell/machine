@@ -51,6 +51,7 @@ const (
 	flAzureUsePrivateIP    = "azure-use-private-ip"
 	flAzureStaticPublicIP  = "azure-static-public-ip"
 	flAzureNoPublicIP      = "azure-no-public-ip"
+	flAzureDNSLabel        = "azure-dns"
 	flAzureStorageType     = "azure-storage-type"
 	flAzureCustomData      = "azure-custom-data"
 	flAzureClientID        = "azure-client-id"
@@ -87,6 +88,7 @@ type Driver struct {
 	PrivateIPAddr  string
 	UsePrivateIP   bool
 	NoPublicIP     bool
+	DNSLabel       string
 	StaticPublicIP bool
 	CustomDataFile string
 
@@ -212,6 +214,11 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:  flAzureStaticPublicIP,
 			Usage: "Assign a static public IP address to the machine",
 		},
+		mcnflag.StringFlag{
+			Name:   flAzureDNSLabel,
+			Usage:  "A unique DNS label for the public IP adddress",
+			EnvVar: "AZURE_DNS_LABEL",
+		},
 		mcnflag.StringSliceFlag{
 			Name:  flAzurePorts,
 			Usage: "Make the specified port number accessible from the Internet",
@@ -267,6 +274,7 @@ func (d *Driver) SetConfigFromFlags(fl drivers.DriverOptions) error {
 	d.NoPublicIP = fl.Bool(flAzureNoPublicIP)
 	d.StaticPublicIP = fl.Bool(flAzureStaticPublicIP)
 	d.DockerPort = fl.Int(flAzureDockerPort)
+	d.DNSLabel = fl.String(flAzureDNSLabel)
 	d.CustomDataFile = fl.String(flAzureCustomData)
 
 	d.ClientID = fl.String(flAzureClientID)
@@ -368,7 +376,7 @@ func (d *Driver) Create() error {
 	if d.NoPublicIP {
 		log.Info("Not creating a public IP address.")
 	} else {
-		if err := c.CreatePublicIPAddress(d.ctx, d.ResourceGroup, d.naming().IP(), d.Location, d.StaticPublicIP); err != nil {
+		if err := c.CreatePublicIPAddress(d.ctx, d.ResourceGroup, d.naming().IP(), d.Location, d.StaticPublicIP, d.DNSLabel); err != nil {
 			return err
 		}
 	}
@@ -376,7 +384,7 @@ func (d *Driver) Create() error {
 		d.ctx.PublicIPAddressID, d.ctx.SubnetID, d.ctx.NetworkSecurityGroupID, d.PrivateIPAddr); err != nil {
 		return err
 	}
-	if err := c.CreateStorageAccount(d.ctx, d.ResourceGroup, d.Location, storage.AccountType(d.StorageType)); err != nil {
+	if err := c.CreateStorageAccount(d.ctx, d.ResourceGroup, d.Location, storage.SkuName(d.StorageType)); err != nil {
 		return err
 	}
 	if err := d.generateSSHKey(d.ctx); err != nil {
@@ -396,7 +404,7 @@ func (d *Driver) Remove() error {
 	}
 
 	// NOTE(ahmetalpbalkan):
-	//   - remove attemps are best effort and if a resource is already gone, we
+	//   - remove attempts are best effort and if a resource is already gone, we
 	//     continue removing other resources instead of failing.
 	//   - we can probably do a lot of parallelization here but a sequential
 	//     logic works fine too. If we were to detach the NIC from the VM and
@@ -554,9 +562,9 @@ func (d *Driver) Kill() error {
 func (d *Driver) checkLegacyDriver(short bool) error {
 	if d.ResourceGroup == "" {
 		if short {
-			return errors.New("New azure driver cannot manage old VMs, downgrade to v0.6.0")
+			return errors.New("new azure driver cannot manage old VMs, downgrade to v0.6.0")
 		}
-		return errors.New("New azure driver uses the new Azure Resource Manager APIs and therefore cannot manage this existing machine created with old azure driver. Please downgrade to docker-machine 0.6.0 to continue using these machines or to remove them.")
+		return errors.New("new azure driver uses the new Azure Resource Manager APIs and therefore cannot manage this existing machine created with old azure driver. Please downgrade to docker-machine 0.6.0 to continue using these machines or to remove them")
 	}
 	return nil
 }

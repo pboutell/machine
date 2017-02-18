@@ -27,7 +27,7 @@ var (
 type HostInfo interface {
 	GetMachineName() string
 
-	GetIP() (string, error)
+	GetSSHHostname() (string, error)
 
 	GetSSHPort() (int, error)
 
@@ -77,7 +77,7 @@ func cmdScp(c CommandLine, api libmachine.API) error {
 func getScpCmd(src, dest string, recursive bool, hostInfoLoader HostInfoLoader) (*exec.Cmd, error) {
 	cmdPath, err := exec.LookPath("scp")
 	if err != nil {
-		return nil, errors.New("Error: You must have a copy of the scp binary locally to use the scp feature.")
+		return nil, errors.New("You must have a copy of the scp binary locally to use the scp feature")
 	}
 
 	srcHost, srcPath, srcOpts, err := getInfoForScpArg(src, hostInfoLoader)
@@ -167,12 +167,12 @@ func generateLocationArg(hostInfo HostInfo, path string) (string, error) {
 		return path, nil
 	}
 
-	ip, err := hostInfo.GetIP()
+	hostname, err := hostInfo.GetSSHHostname()
 	if err != nil {
 		return "", err
 	}
 
-	location := fmt.Sprintf("%s@%s:%s", hostInfo.GetSSHUsername(), ip, path)
+	location := fmt.Sprintf("%s@%s:%s", hostInfo.GetSSHUsername(), hostname, path)
 	return location, nil
 }
 

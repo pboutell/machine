@@ -6,6 +6,10 @@ import (
 	"errors"
 	"reflect"
 
+	"io/ioutil"
+	"os"
+	"path/filepath"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/docker/machine/commands/commandstest"
@@ -109,6 +113,29 @@ func TestConfigureSecurityGroupPermissionsOpenPorts(t *testing.T) {
 	assert.Equal(t, aws.String("tcp"), perms[4].IpProtocol)
 }
 
+func TestConfigureSecurityGroupPermissionsOpenPortsSkipExisting(t *testing.T) {
+	driver := NewTestDriver()
+	group := securityGroup
+	group.IpPermissions = []*ec2.IpPermission{
+		{
+			IpProtocol: aws.String("tcp"),
+			FromPort:   aws.Int64(8888),
+			ToPort:     aws.Int64(testSSHPort),
+		},
+		{
+			IpProtocol: aws.String("tcp"),
+			FromPort:   aws.Int64(8080),
+			ToPort:     aws.Int64(testSSHPort),
+		},
+	}
+	driver.OpenPorts = []string{"8888/tcp", "8080/udp", "8080"}
+	perms, err := driver.configureSecurityGroupPermissions(group)
+	assert.NoError(t, err)
+	assert.Len(t, perms, 3)
+	assert.Equal(t, aws.Int64(int64(8080)), perms[2].ToPort)
+	assert.Equal(t, aws.String("udp"), perms[2].IpProtocol)
+}
+
 func TestConfigureSecurityGroupPermissionsInvalidOpenPorts(t *testing.T) {
 	driver := NewTestDriver()
 	driver.OpenPorts = []string{"2222/tcp", "abc1"}
@@ -154,7 +181,7 @@ func TestValidateAwsRegionValid(t *testing.T) {
 }
 
 func TestValidateAwsRegionInvalid(t *testing.T) {
-	regions := []string{"eu-west-2", "eu-central-2"}
+	regions := []string{"eu-central-2"}
 
 	for _, region := range regions {
 		_, err := validateAwsRegion(region)
@@ -165,7 +192,9 @@ func TestValidateAwsRegionInvalid(t *testing.T) {
 
 func TestFindDefaultVPC(t *testing.T) {
 	driver := NewDriver("machineFoo", "path")
-	driver.clientFactory = func() Ec2Client { return &fakeEC2WithLogin{} }
+	driver.clientFactory = func() Ec2Client {
+		return &fakeEC2WithLogin{}
+	}
 
 	vpc, err := driver.getDefaultVPCId()
 
@@ -191,7 +220,7 @@ func TestDefaultVPCIsMissing(t *testing.T) {
 
 func TestGetRegionZoneForDefaultEndpoint(t *testing.T) {
 	driver := NewCustomTestDriver(&fakeEC2WithLogin{})
-	driver.awsCredentials = &fileCredentials{}
+	driver.awsCredentialsFactory = NewValidAwsCredentials
 	options := &commandstest.FakeFlagger{
 		Data: map[string]interface{}{
 			"name":             "test",
@@ -210,7 +239,7 @@ func TestGetRegionZoneForDefaultEndpoint(t *testing.T) {
 
 func TestGetRegionZoneForCustomEndpoint(t *testing.T) {
 	driver := NewCustomTestDriver(&fakeEC2WithLogin{})
-	driver.awsCredentials = &fileCredentials{}
+	driver.awsCredentialsFactory = NewValidAwsCredentials
 	options := &commandstest.FakeFlagger{
 		Data: map[string]interface{}{
 			"name":               "test",
@@ -242,9 +271,10 @@ func TestDescribeAccountAttributeFails(t *testing.T) {
 	assert.Empty(t, vpc)
 }
 
-func TestAccessKeyIsMandatory(t *testing.T) {
+func TestAwsCredentialsAreRequired(t *testing.T) {
 	driver := NewTestDriver()
-	driver.awsCredentials = &cliCredentials{}
+	driver.awsCredentialsFactory = NewErrorAwsCredentials
+
 	options := &commandstest.FakeFlagger{
 		Data: map[string]interface{}{
 			"name":             "test",
@@ -254,47 +284,12 @@ func TestAccessKeyIsMandatory(t *testing.T) {
 	}
 
 	err := driver.SetConfigFromFlags(options)
-
-	assert.Equal(t, err, errorMissingAccessKeyOption)
+	assert.Equal(t, err, errorMissingCredentials)
 }
 
-func TestAccessKeyIsMandatoryEvenIfSecretKeyIsPassed(t *testing.T) {
-	driver := NewTestDriver()
-	driver.awsCredentials = &cliCredentials{}
-	options := &commandstest.FakeFlagger{
-		Data: map[string]interface{}{
-			"name":                 "test",
-			"amazonec2-secret-key": "123",
-			"amazonec2-region":     "us-east-1",
-			"amazonec2-zone":       "e",
-		},
-	}
-
-	err := driver.SetConfigFromFlags(options)
-
-	assert.Equal(t, err, errorMissingAccessKeyOption)
-}
-
-func TestSecretKeyIsMandatory(t *testing.T) {
-	driver := NewTestDriver()
-	driver.awsCredentials = &cliCredentials{}
-	options := &commandstest.FakeFlagger{
-		Data: map[string]interface{}{
-			"name":                 "test",
-			"amazonec2-access-key": "foobar",
-			"amazonec2-region":     "us-east-1",
-			"amazonec2-zone":       "e",
-		},
-	}
-
-	err := driver.SetConfigFromFlags(options)
-
-	assert.Equal(t, err, errorMissingSecretKeyOption)
-}
-
-func TestLoadingFromCredentialsWorked(t *testing.T) {
+func TestValidAwsCredentialsAreAccepted(t *testing.T) {
 	driver := NewCustomTestDriver(&fakeEC2WithLogin{})
-	driver.awsCredentials = &fileCredentials{}
+	driver.awsCredentialsFactory = NewValidAwsCredentials
 	options := &commandstest.FakeFlagger{
 		Data: map[string]interface{}{
 			"name":             "test",
@@ -304,36 +299,12 @@ func TestLoadingFromCredentialsWorked(t *testing.T) {
 	}
 
 	err := driver.SetConfigFromFlags(options)
-
 	assert.NoError(t, err)
-	assert.Equal(t, "access", driver.AccessKey)
-	assert.Equal(t, "secret", driver.SecretKey)
-	assert.Equal(t, "token", driver.SessionToken)
-}
-
-func TestPassingBothCLIArgWorked(t *testing.T) {
-	driver := NewCustomTestDriver(&fakeEC2WithLogin{})
-	driver.awsCredentials = &cliCredentials{}
-	options := &commandstest.FakeFlagger{
-		Data: map[string]interface{}{
-			"name":                 "test",
-			"amazonec2-access-key": "foobar",
-			"amazonec2-secret-key": "123",
-			"amazonec2-region":     "us-east-1",
-			"amazonec2-zone":       "e",
-		},
-	}
-
-	err := driver.SetConfigFromFlags(options)
-
-	assert.NoError(t, err)
-	assert.Equal(t, "foobar", driver.AccessKey)
-	assert.Equal(t, "123", driver.SecretKey)
 }
 
 func TestEndpointIsMandatoryWhenSSLDisabled(t *testing.T) {
 	driver := NewTestDriver()
-	driver.awsCredentials = &cliCredentials{}
+	driver.awsCredentialsFactory = NewValidAwsCredentials
 	options := &commandstest.FakeFlagger{
 		Data: map[string]interface{}{
 			"name":                         "test",
@@ -506,4 +477,50 @@ func TestConfigureSecurityGroupsErrLookupExist(t *testing.T) {
 
 	assert.Exactly(t, lookupExistErr, err)
 	recorder.AssertExpectations(t)
+}
+
+func TestBase64UserDataIsEmptyIfNoFileProvided(t *testing.T) {
+	driver := NewTestDriver()
+
+	userdata, err := driver.Base64UserData()
+
+	assert.NoError(t, err)
+	assert.Empty(t, userdata)
+}
+
+func TestBase64UserDataGeneratesErrorIfFileNotFound(t *testing.T) {
+	dir, err := ioutil.TempDir("", "awsuserdata")
+	assert.NoError(t, err, "Unable to create temporary directory.")
+
+	defer os.RemoveAll(dir)
+	userdata_path := filepath.Join(dir, "does-not-exist.yml")
+
+	driver := NewTestDriver()
+	driver.UserDataFile = userdata_path
+
+	_, ud_err := driver.Base64UserData()
+	assert.Equal(t, ud_err, errorReadingUserData)
+}
+
+func TestBase64UserDataIsCorrectWhenFileProvided(t *testing.T) {
+	dir, err := ioutil.TempDir("", "awsuserdata")
+	assert.NoError(t, err, "Unable to create temporary directory.")
+
+	defer os.RemoveAll(dir)
+
+	userdata_path := filepath.Join(dir, "test-userdata.yml")
+
+	content := []byte("#cloud-config\nhostname: userdata-test\nfqdn: userdata-test.amazonec2.driver\n")
+	contentBase64 := "I2Nsb3VkLWNvbmZpZwpob3N0bmFtZTogdXNlcmRhdGEtdGVzdApmcWRuOiB1c2VyZGF0YS10ZXN0LmFtYXpvbmVjMi5kcml2ZXIK"
+
+	err = ioutil.WriteFile(userdata_path, content, 0666)
+	assert.NoError(t, err, "Unable to create temporary userdata file.")
+
+	driver := NewTestDriver()
+	driver.UserDataFile = userdata_path
+
+	userdata, ud_err := driver.Base64UserData()
+
+	assert.NoError(t, ud_err)
+	assert.Equal(t, contentBase64, userdata)
 }
